@@ -123,27 +123,31 @@ class RAGSystem:
             conversation_history = self.get_conversation_history(session_id)
             
             # First, determine if this is a medical or non-medical question
-            # Define medical keywords to detect medical questions
-            medical_keywords = ["health", "medicine", "doctor", "hospital", "disease", "condition", 
+            # Define keyword lists for fallback use and medical context enrichment
+            medical_keywords = ["health", "medicine", "doctor", "hospital", "disease", "condition",
                               "symptom", "treatment", "drug", "patient", "nurse", "therapy", "medical",
                               "clinical", "diagnosis", "surgery", "organ", "body", "anatomy", "nursing",
                               "blood", "heart", "lungs", "brain", "liver", "kidney", "ph level", "hp",
                               "immune", "diet", "nutrition", "cancer", "diabetes", "virus", "bacterial",
                               "infection", "prescription", "diagnosis", "prognosis", "chronic", "acute"]
-                              
-            # Non-medical keywords list                
-            non_medical_keywords = ["computer", "programming", "gaming", "video game", "sports", "politics", 
-                                  "entertainment", "movies", "celebrity", "stock market", "finance", 
-                                  "cooking", "recipes", "travel", "vacation", "cars", "fashion", 
+
+            # Non-medical keywords list for heuristic fallback
+            non_medical_keywords = ["computer", "programming", "gaming", "video game", "sports", "politics",
+                                  "entertainment", "movies", "celebrity", "stock market", "finance",
+                                  "cooking", "recipes", "travel", "vacation", "cars", "fashion",
                                   "technology", "crypto", "weather", "news", "music", "art", "books"]
-            
-            # Check if this is a non-medical question
-            is_non_medical = any(keyword in question.lower() for keyword in non_medical_keywords) and \
-                            not any(keyword in question.lower() for keyword in medical_keywords)
-            
-            # Check if this is clearly a medical question
-            is_medical = any(keyword in question.lower() for keyword in medical_keywords)
-            
+
+            # Primary classification using LLM
+            classification = self.llm_client.classify_query(question)
+            is_medical = classification == "medical"
+            is_non_medical = classification == "non-medical"
+
+            # Fallback to keyword heuristics if LLM classification is unavailable
+            if classification is None:
+                is_non_medical = any(keyword in question.lower() for keyword in non_medical_keywords) and \
+                                not any(keyword in question.lower() for keyword in medical_keywords)
+                is_medical = any(keyword in question.lower() for keyword in medical_keywords)
+
             # If it's a non-medical question, return early with a polite response
             if is_non_medical:
                 return {

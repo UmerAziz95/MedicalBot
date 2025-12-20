@@ -67,6 +67,65 @@ class LLMClient:
             return self._generate_openai(prompt, max_tokens)
         else:
             return f"Unsupported LLM provider: {self.provider}"
+
+    def classify_query(self, question: str) -> Optional[str]:
+        """
+        Classify a query as medical or non-medical using the LLM.
+
+        Args:
+            question (str): The user's question to classify
+
+        Returns:
+            Optional[str]: "medical", "non-medical", or None if classification fails
+        """
+        if not question:
+            return None
+
+        if self.provider != "openai":
+            return None
+
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a classifier that labels user questions as either medical or non-medical. "
+                        "Respond with a single word: 'medical' if the primary intent is about health, medicine, "
+                        "or healthcare topics; otherwise respond with 'non-medical'."
+                    ),
+                },
+                {"role": "user", "content": question},
+            ]
+
+            token_param = "max_completion_tokens" if self.is_gpt5_nano else "max_tokens"
+            kwargs = {token_param: 5}
+
+            if self.openai_version == "new":
+                response = self.openai_client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    **kwargs,
+                )
+                content = response.choices[0].message.content.strip().lower()
+            else:
+                response = self.openai_client.ChatCompletion.create(
+                    model=self.model,
+                    messages=messages,
+                    **kwargs,
+                )
+                content = response.choices[0].message["content"].strip().lower()
+
+            normalized = content.replace("nonmedical", "non-medical")
+            if normalized.startswith("non-medical") or normalized.startswith("non medical"):
+                return "non-medical"
+            if normalized.startswith("medical"):
+                return "medical"
+
+            return None
+        except Exception as e:
+            print(f"Error classifying query: {e}")
+            print(traceback.format_exc())
+            return None
     
     def _generate_openai(self, prompt: str, max_tokens: int = 1000) -> str:
         """
