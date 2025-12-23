@@ -22,7 +22,7 @@ CHUNK_OVERLAP = 50
 # Vector database configuration (PostgreSQL + pgvector)
 PGVECTOR_CONNECTION_URI = os.getenv(
     "PGVECTOR_CONNECTION_URI",
-    "postgresql://postgres:postgres@localhost:5432/medicalbot",
+    "postgresql+asyncpg://postgres:faziA12#@localhost:5433/medicalbot",
 )
 PGVECTOR_TABLE = os.getenv("PGVECTOR_TABLE", "rag_documents")
 EMBEDDING_MODEL_NAME = os.getenv(
