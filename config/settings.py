@@ -5,7 +5,7 @@ Configuration file for RAG system
 import os
 
 # OpenAI API Configuration
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 OPENAI_MODEL = "gpt-5-nano"  # Fixed model name - gpt-5-nano doesn't exist yet
 
 # Ollama Configuration (for local models)

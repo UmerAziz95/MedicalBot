@@ -227,7 +227,7 @@ If the question contains unclear or uncommon terminology, interpret what the use
 that would be most helpful, while clarifying the standard medical terms.
 
 Question: {question}
-Answer:"""
+Answer:""" 
                 else:
                     # No context from RAG, generate purely from LLM knowledge
                     medical_prompt = f"""You are a knowledgeable medical assistant.
