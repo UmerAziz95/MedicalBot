@@ -1,0 +1,9 @@
+flask
+flask-cors
+openai
+humanize
+pypdf
+Pillow
+sentence-transformers
+psycopg[binary]
+pgvector

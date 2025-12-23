@@ -2,3 +2,5 @@
 data/chroma_db/chroma.sqlite3
 static/documents/*.pdf
 data/chroma_db/*/data_level0.bin
+__pycache__/
+*.pyc
