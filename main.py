@@ -122,7 +122,6 @@ if __name__ == "__main__":
     
     # Create necessary directories
     os.makedirs("data/documents", exist_ok=True)
-    os.makedirs("data/chroma_db", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
     
     if len(sys.argv) > 1 and sys.argv[1] == "--interactive":

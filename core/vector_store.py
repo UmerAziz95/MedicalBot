@@ -1,192 +1,213 @@
 """
-Vector database operations using ChromaDB
+Vector database operations using PostgreSQL + pgvector
 """
 
-import chromadb
-from typing import List, Dict, Any, Optional
-from config.settings import COLLECTION_NAME, CHROMA_DB_PATH
+import json
+import uuid
+from typing import Any, Dict, List, Optional
+
+import psycopg
+from pgvector.psycopg import register_vector, Vector
+from psycopg import sql
+from sentence_transformers import SentenceTransformer
+
+from config.settings import (
+    EMBEDDING_MODEL_NAME,
+    PGVECTOR_CONNECTION_URI,
+    PGVECTOR_TABLE,
+)
 
 
 class VectorStore:
-    """Handle vector database operations"""
-    
-    def __init__(self, db_path: Optional[str] = None):
-        """
-        Initialize ChromaDB client and collection
-        
-        Args:
-            db_path (str, optional): Path to the ChromaDB directory
-        """
-        # Use provided path or default from config
-        path_to_use = db_path if db_path is not None else CHROMA_DB_PATH
-        
-        # Use persistent client with a specific path
-        self.client = chromadb.PersistentClient(path=path_to_use)
-        self.collection_name = COLLECTION_NAME
-        self.collection = None
-        self._ensure_collection_exists()
-    
-    def _ensure_collection_exists(self):
-        """Ensure collection exists and is accessible"""
+    """Handle vector database operations using PostgreSQL and pgvector."""
+
+    def __init__(
+        self,
+        connection_uri: Optional[str] = None,
+        table_name: Optional[str] = None,
+        embedding_model: Optional[str] = None,
+    ) -> None:
+        self.connection_uri = connection_uri or PGVECTOR_CONNECTION_URI
+        self.table_name = table_name or PGVECTOR_TABLE
+        self.embedding_model_name = embedding_model or EMBEDDING_MODEL_NAME
+
+        self.model = SentenceTransformer(self.embedding_model_name)
+        self.embedding_dimension = len(self.model.encode("example"))
+
         try:
-            # Try to get existing collection
-            self.collection = self.client.get_collection(self.collection_name)
-            print(f"✅ Connected to existing collection: {self.collection_name}")
-        except:
-            try:
-                # Create new collection if it doesn't exist
-                self.collection = self.client.create_collection(self.collection_name)
-                print(f"✅ Created new collection: {self.collection_name}")
-            except:
-                # Use get_or_create as fallback
-                self.collection = self.client.get_or_create_collection(self.collection_name)
-                print(f"✅ Got or created collection: {self.collection_name}")
-    
-    def store_chunks(self, chunks: List[str]) -> None:
-        """
-        Store text chunks in the vector database
-        
-        Args:
-            chunks (List[str]): List of text chunks to store
-        """
-        print(f"Storing {len(chunks)} chunks in vector database...")
-        
-        for i, chunk in enumerate(chunks):
-            print(f"Storing chunk {i+1}/{len(chunks)}")
-            print(f"Preview: {chunk[:100]}...")
-            
-            self.collection.add(
-                ids=[str(i)],
-                documents=[chunk]
+            self.conn = psycopg.connect(self.connection_uri, autocommit=True)
+        except psycopg.Error as exc:  # pragma: no cover - connection guard
+            raise RuntimeError(
+                f"Unable to connect to PostgreSQL at {self.connection_uri}. "
+                "Set PGVECTOR_CONNECTION_URI to a reachable database that has pgvector installed."
+            ) from exc
+
+        register_vector(self.conn)
+        self._ensure_schema()
+
+    def _ensure_schema(self) -> None:
+        """Create required extensions, table, and indexes if they do not exist."""
+        with self.conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            cur.execute(
+                sql.SQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS {table} (
+                        id TEXT PRIMARY KEY,
+                        content TEXT NOT NULL,
+                        metadata JSONB,
+                        embedding vector({dimension}) NOT NULL
+                    );
+                    """
+                ).format(
+                    table=sql.Identifier(self.table_name),
+                    dimension=sql.Literal(self.embedding_dimension),
+                )
             )
+            cur.execute(
+                sql.SQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS {index_name}
+                    ON {table}
+                    USING ivfflat (embedding vector_cosine_ops)
+                    WITH (lists = 100);
+                    """
+                ).format(
+                    index_name=sql.Identifier(f"{self.table_name}_embedding_idx"),
+                    table=sql.Identifier(self.table_name),
+                )
+            )
+
+    def _embed(self, text: str) -> Vector:
+        """Create an embedding vector for the provided text."""
+        embedding = self.model.encode(text, normalize_embeddings=True)
+        return Vector(embedding.tolist())
+
+    def store_chunks(
+        self,
+        chunks: List[str],
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+        ids: Optional[List[str]] = None,
+    ) -> List[str]:
+        """Store text chunks in the vector database."""
+        if metadatas is None:
+            metadatas = [{} for _ in chunks]
+        if ids is None:
+            ids = [str(uuid.uuid4()) for _ in chunks]
+
+        stored_ids: List[str] = []
+        print(f"Storing {len(chunks)} chunks in PostgreSQL vector store...")
+        with self.conn.cursor() as cur:
+            for idx, chunk in enumerate(chunks):
+                chunk_id = ids[idx] if idx < len(ids) else str(uuid.uuid4())
+                metadata = metadatas[idx] if idx < len(metadatas) else {}
+                embedding = self._embed(chunk)
+                cur.execute(
+                    sql.SQL(
+                        """
+                        INSERT INTO {table} (id, content, metadata, embedding)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (id)
+                        DO UPDATE SET content = EXCLUDED.content,
+                                      metadata = EXCLUDED.metadata,
+                                      embedding = EXCLUDED.embedding;
+                        """
+                    ).format(table=sql.Identifier(self.table_name)),
+                    (chunk_id, chunk, json.dumps(metadata), embedding),
+                )
+                stored_ids.append(chunk_id)
         print("✅ All chunks stored successfully!")
-    
+        return stored_ids
+
     def query_similar_chunks(self, question: str, n_results: int = 3) -> List[str]:
-        """
-        Query the vector database for similar chunks
-        
-        Args:
-            question (str): User question
-            n_results (int): Number of similar chunks to retrieve
-            
-        Returns:
-            List[str]: List of similar text chunks
-        """
-        # Ensure collection exists before querying
-        self._ensure_collection_exists()
-        
-        try:
-            results = self.collection.query(
-                query_texts=[question],
-                n_results=n_results,
-                include=["documents"]
-            )
-            
-            retrieved_chunks = results["documents"][0] if results["documents"] else []
-            print(f"Retrieved {len(retrieved_chunks)} relevant chunks")
-            
-            return retrieved_chunks
-            
-        except Exception as e:
-            print(f"Error querying collection: {e}")
-            # Try to recreate collection
-            self._ensure_collection_exists()
-            return []
-    
+        """Query the vector database for similar chunks."""
+        results = self.search(question, k=n_results)
+        return [res["content"] for res in results]
+
     def search(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
-        """
-        Search for similar documents (compatibility method)
-        
-        Args:
-            query (str): Query string
-            k (int): Number of results to return
-            
-        Returns:
-            List[Dict[str, Any]]: List of document data with similarity scores
-        """
-        # Ensure collection exists
-        self._ensure_collection_exists()
-        
-        try:
-            # Query the collection
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=k,
-                include=["documents", "metadatas", "distances"]
+        """Search for similar documents."""
+        embedding = self._embed(query)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                sql.SQL(
+                    """
+                    SELECT id, content, metadata,
+                           1 - (embedding <=> %s) AS similarity
+                    FROM {table}
+                    ORDER BY embedding <=> %s
+                    LIMIT %s;
+                    """
+                ).format(table=sql.Identifier(self.table_name)),
+                (embedding, embedding, k),
             )
-            
-            formatted_results = []
-            if results and "documents" in results and results["documents"]:
-                for i, doc in enumerate(results["documents"][0]):
-                    metadata = results["metadatas"][0][i] if "metadatas" in results and results["metadatas"] and i < len(results["metadatas"][0]) else {}
-                    distance = results["distances"][0][i] if "distances" in results and results["distances"] and i < len(results["distances"][0]) else None
-                    
-                    formatted_results.append({
-                        "content": doc,
-                        "metadata": metadata,
-                        "similarity": 1.0 - (distance or 0) if distance is not None else None
-                    })
-            
-            print(f"Found {len(formatted_results)} matching documents")
-            return formatted_results
-        
-        except Exception as e:
-            print(f"Error searching collection: {e}")
-            return []
-    
-    def add_text(self, text: str, metadata: Dict[str, Any] = None) -> str:
-        """
-        Add a single text chunk with metadata
-        
-        Args:
-            text (str): Text content
-            metadata (Dict[str, Any]): Associated metadata
-            
-        Returns:
-            str: ID of the added document
-        """
-        # Generate a unique ID
-        import uuid
+            rows = cur.fetchall()
+
+        formatted_results: List[Dict[str, Any]] = []
+        for row in rows:
+            doc_id, content, metadata, similarity = row
+            formatted_results.append(
+                {
+                    "id": doc_id,
+                    "content": content,
+                    "metadata": metadata or {},
+                    "similarity": similarity,
+                }
+            )
+        print(f"Found {len(formatted_results)} matching documents")
+        return formatted_results
+
+    def add_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Add a single text chunk with metadata."""
         doc_id = str(uuid.uuid4())
-        
-        # Store document
-        self.collection.add(
-            ids=[doc_id],
-            documents=[text],
-            metadatas=[metadata or {}]
-        )
-        
+        self.store_chunks([text], metadatas=[metadata or {}], ids=[doc_id])
         return doc_id
-    
+
     def clear(self) -> None:
-        """Clear all data from the collection"""
-        return self.clear_collection()
-    
+        """Clear all data from the collection."""
+        self.clear_collection()
+
     def clear_collection(self) -> None:
-        """Clear all data from the collection"""
-        try:
-            self.client.delete_collection(self.collection_name)
-            print("✅ Collection cleared successfully!")
-        except Exception as e:
-            print(f"Note: Collection may not exist: {e}")
-        
-        # Recreate the collection
-        self._ensure_collection_exists()
-    
+        """Clear all data from the collection."""
+        with self.conn.cursor() as cur:
+            cur.execute(sql.SQL("TRUNCATE TABLE {table};").format(table=sql.Identifier(self.table_name)))
+        print("✅ Collection cleared successfully!")
+
     def count(self) -> int:
-        """Get the number of documents in the collection"""
-        try:
-            return self.collection.count()
-        except:
-            return 0
-    
+        """Get the number of documents in the collection."""
+        with self.conn.cursor() as cur:
+            cur.execute(sql.SQL("SELECT COUNT(*) FROM {table};").format(table=sql.Identifier(self.table_name)))
+            row = cur.fetchone()
+            return row[0] if row else 0
+
     def get_collection_info(self) -> Dict[str, Any]:
-        """Get information about the current collection"""
+        """Get information about the current collection."""
         try:
-            count = self.collection.count()
             return {
-                "name": COLLECTION_NAME,
-                "document_count": count
+                "name": self.table_name,
+                "document_count": self.count(),
             }
-        except Exception as e:
-            return {"error": str(e)}
+        except Exception as exc:  # pragma: no cover - defensive logging
+            return {"error": str(exc)}
+
+    def distinct_sources(self, limit: int = 200) -> List[str]:
+        """Return distinct source values recorded in metadata."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                sql.SQL(
+                    """
+                    SELECT DISTINCT metadata ->> 'source'
+                    FROM {table}
+                    WHERE metadata ? 'source'
+                    LIMIT %s;
+                    """
+                ).format(table=sql.Identifier(self.table_name)),
+                (limit,),
+            )
+            return [row[0] for row in cur.fetchall() if row[0]]
+
+    def __del__(self) -> None:
+        try:
+            if hasattr(self, "conn"):
+                self.conn.close()
+        except Exception:
+            pass

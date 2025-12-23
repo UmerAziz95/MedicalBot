@@ -14,7 +14,7 @@ from processors.document_processor import DocumentProcessor
 from core.vector_store import VectorStore
 from utils.prompts import Prompts
 from core.llm_client import LLMClient
-from config.settings import VECTOR_DB_PATH, CHUNK_SIZE, CHUNK_OVERLAP, MAX_RETRIEVED_CHUNKS
+from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, MAX_RETRIEVED_CHUNKS
 
 class RAGSystem:
     """
@@ -25,7 +25,7 @@ class RAGSystem:
     def __init__(self, max_history_length: int = 10):
         """Initialize the RAG system components"""
         self.doc_processor = DocumentProcessor()
-        self.vector_store = VectorStore(VECTOR_DB_PATH)
+        self.vector_store = VectorStore()
         self.prompts = Prompts()
         self.llm_client = LLMClient()
         

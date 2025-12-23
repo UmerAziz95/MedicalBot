@@ -19,11 +19,17 @@ LLM_PROVIDER = "openai"  # Options: "openai", "ollama"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
-# ChromaDB Configuration
-COLLECTION_NAME = "rag_documents"
-CHROMA_DB_PATH = "./data/chroma_db"
-# Add this line to ensure compatibility with modules that expect VECTOR_DB_PATH
-VECTOR_DB_PATH = CHROMA_DB_PATH  # Alias for backward compatibility
+# Vector database configuration (PostgreSQL + pgvector)
+PGVECTOR_CONNECTION_URI = os.getenv(
+    "PGVECTOR_CONNECTION_URI",
+    "postgresql://postgres:postgres@localhost:5432/medicalbot",
+)
+PGVECTOR_TABLE = os.getenv("PGVECTOR_TABLE", "rag_documents")
+EMBEDDING_MODEL_NAME = os.getenv(
+    "EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"
+)
+# Alias for backward compatibility with older code paths
+VECTOR_DB_PATH = PGVECTOR_CONNECTION_URI
 
 # RAG Configuration
 MAX_RETRIEVED_CHUNKS = 3
@@ -57,7 +63,5 @@ for directory in [PDF_FOLDER, DATA_DIR, LOGS_DIR, STATIC_DIR]:
         os.makedirs(directory, exist_ok=True)
         print(f"Created directory: {directory}")
 
-# Create chroma_db directory
-if CHROMA_DB_PATH and not os.path.exists(CHROMA_DB_PATH):
-    os.makedirs(CHROMA_DB_PATH, exist_ok=True)
-    print(f"Created directory: {CHROMA_DB_PATH}")
+# No local directory is required for pgvector persistence because data
+# is stored directly in PostgreSQL.

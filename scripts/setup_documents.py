@@ -77,29 +77,24 @@ class DocumentSetup:
             # Store chunks with metadata
             print("   💾 Storing in database...")
             file_name = os.path.basename(file_path)
-            
-            # Add metadata to chunks
-            chunk_ids = []
-            chunk_docs = []
-            chunk_metadatas = []
-            
+
             current_count = self.vector_store.get_collection_info().get('document_count', 0)
-            
-            for i, chunk in enumerate(chunks):
-                chunk_id = f"{file_name}_{current_count + i}"
-                chunk_ids.append(chunk_id)
-                chunk_docs.append(chunk)
+
+            chunk_ids = []
+            chunk_metadatas = []
+            for i, _ in enumerate(chunks):
+                chunk_ids.append(f"{file_name}_{current_count + i}")
                 chunk_metadatas.append({
                     "source": file_name,
                     "chunk_index": i,
                     "total_chunks": len(chunks)
                 })
-            
+
             # Store all chunks at once
-            self.vector_store.collection.add(
-                ids=chunk_ids,
-                documents=chunk_docs,
-                metadatas=chunk_metadatas
+            self.vector_store.store_chunks(
+                chunks,
+                metadatas=chunk_metadatas,
+                ids=chunk_ids
             )
             
             print(f"   ✅ Stored {len(chunks)} chunks successfully")
@@ -156,23 +151,10 @@ class DocumentSetup:
         """Get current database information"""
         info = self.vector_store.get_collection_info()
         
-        # Try to get file information from metadata
         try:
-            # Query a few documents to see what sources we have
-            sample_results = self.vector_store.collection.get(
-                limit=100,
-                include=["metadatas"]
-            )
-            
-            sources = set()
-            if sample_results and "metadatas" in sample_results:
-                for metadata in sample_results["metadatas"]:
-                    if metadata and "source" in metadata:
-                        sources.add(metadata["source"])
-            
-            info["sources"] = list(sources)
+            sources = self.vector_store.distinct_sources()
+            info["sources"] = sources
             info["unique_documents"] = len(sources)
-            
         except Exception as e:
             info["sources"] = []
             info["unique_documents"] = 0

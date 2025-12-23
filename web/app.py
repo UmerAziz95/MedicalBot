@@ -41,7 +41,6 @@ def create_app():
     
     # Create necessary directories
     os.makedirs("data/documents", exist_ok=True)
-    os.makedirs("data/chroma_db", exist_ok=True)
     os.makedirs("data/conversations", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
     os.makedirs("temp_uploads", exist_ok=True)
