@@ -217,6 +217,10 @@ def register_routes(app):
             include_history = payload.get("include_history", True)
             disclaimer = payload.get("disclaimer")
             k = int(payload.get("k", MAX_RETRIEVED_CHUNKS))
+            tenant_id = payload.get("tenant_id")
+            workspace_id = payload.get("workspace_id")
+            prior_chat_history = payload.get("prior_chat_history")
+            external_knowledge_instructions = payload.get("external_knowledge_instructions")
 
             if not question:
                 return jsonify({"success": False, "error": "Query text is required."}), 400
@@ -231,7 +235,11 @@ def register_routes(app):
                 session_id=session_id,
                 k=k,
                 include_history=include_history,
-                disclaimer=disclaimer
+                disclaimer=disclaimer,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                prior_chat_history=prior_chat_history,
+                external_knowledge_instructions=external_knowledge_instructions
             )
 
             return jsonify(result), (200 if result.get("success") else 400)
@@ -286,11 +294,18 @@ def register_routes(app):
             temp_path = os.path.join(temp_dir, file.filename)
             
             file.save(temp_path)
+
+            tenant_id = request.form.get("tenant_id") or request.args.get("tenant_id")
+            workspace_id = request.form.get("workspace_id") or request.args.get("workspace_id")
             
             try:
                 # Process file
                 rag, setup = init_system()
-                result = setup.add_document(temp_path)
+                result = setup.add_document(
+                    temp_path,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id
+                )
                 
                 return jsonify({
                     "success": result.get("success", False),

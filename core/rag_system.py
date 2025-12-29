@@ -365,7 +365,11 @@ Answer:"""
 
     def api_query(self, question: str, session_id: str = "default", 
                  k: int = MAX_RETRIEVED_CHUNKS, include_history: bool = True,
-                 disclaimer: Optional[str] = None) -> Dict[str, Any]:
+                 disclaimer: Optional[str] = None,
+                 tenant_id: Optional[str] = None,
+                 workspace_id: Optional[str] = None,
+                 prior_chat_history: Optional[List[Dict[str, str]]] = None,
+                 external_knowledge_instructions: Optional[str] = None) -> Dict[str, Any]:
         """
         Structured API-friendly query handler that always includes a medical disclaimer
         in the LLM prompt and surfaces retrieved context and conversation history.
@@ -387,15 +391,30 @@ Answer:"""
                 "answer": None
             }
 
-        # Gather conversation history if requested
-        conversation_history = self.get_conversation_history(session_id) if include_history else ""
+        # Gather conversation history if requested or supplied explicitly
+        conversation_history = ""
+        if prior_chat_history:
+            formatted_history = ""
+            for entry in prior_chat_history:
+                role = entry.get("role", "user").capitalize()
+                content = entry.get("content", "")
+                formatted_history += f"{role}: {content}\n"
+            conversation_history = formatted_history
+        elif include_history:
+            conversation_history = self.get_conversation_history(session_id)
 
         # Classify query to gate non-medical topics
         classification = self.llm_client.classify_query(question)
         is_non_medical = classification == "non-medical"
 
         # Retrieve RAG context
-        results = self.vector_store.search(question, k=k)
+        where_filter = {}
+        if tenant_id:
+            where_filter["tenant_id"] = tenant_id
+        if workspace_id:
+            where_filter["workspace_id"] = workspace_id
+
+        results = self.vector_store.search(question, k=k, where=where_filter or None)
         chunks_found = len(results)
         context_chunks = [res.get("content", "") for res in results]
         rag_context = "\n\n".join(context_chunks) if context_chunks else "No context retrieved from the knowledge base."
@@ -407,16 +426,25 @@ Answer:"""
         )
         disclaimer_text = f"{base_disclaimer}\n\nAdditional context: {disclaimer.strip()}" if disclaimer else base_disclaimer
 
+        tenant_section = f"Tenant: {tenant_id or 'default_tenant'}\nWorkspace: {workspace_id or 'default_workspace'}"
+        extra_instructions = external_knowledge_instructions or ""
+
         structured_prompt = f"""{disclaimer_text}
 
 User Query:
 {question}
+
+Tenant/Workspace Context:
+{tenant_section}
 
 Relevant RAG Chunks:
 {rag_context}
 
 Previous Chat Context:
 {conversation_history if conversation_history else 'No previous messages.'}
+
+External Knowledge Instructions:
+{extra_instructions if extra_instructions else 'None provided.'}
 
 Instructions:
 - Use the provided RAG context first; if it is insufficient, rely on safe, general medical knowledge.
@@ -442,6 +470,8 @@ Answer:"""
             "disclaimer": disclaimer_text,
             "conversation_history_included": include_history,
             "rag_context": rag_context,
+            "tenant_id": tenant_id or "default_tenant",
+            "workspace_id": workspace_id or "default_workspace",
             "context_snippets": [
                 {
                     "content": res.get("content", ""),
@@ -585,7 +615,9 @@ Answer:"""
                 "error": str(e)
             }
     
-    def add_document(self, file_path: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
+    def add_document(self, file_path: str, metadata: Optional[Dict] = None,
+                    tenant_id: Optional[str] = None,
+                    workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Add a document to the RAG system
         
@@ -609,8 +641,12 @@ Answer:"""
             if metadata is None:
                 metadata = {
                     "source": os.path.basename(file_path),
-                    "added_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
+
+            # Always include tenant/workspace scoping
+            metadata["tenant_id"] = tenant_id or metadata.get("tenant_id") or "default_tenant"
+            metadata["workspace_id"] = workspace_id or metadata.get("workspace_id") or "default_workspace"
             
             # Add chunks to vector store
             for i, chunk in enumerate(chunks):
