@@ -362,6 +362,95 @@ Answer:"""
                     "success": False,
                     "error": str(e)
                 }
+
+    def api_query(self, question: str, session_id: str = "default", 
+                 k: int = MAX_RETRIEVED_CHUNKS, include_history: bool = True,
+                 disclaimer: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Structured API-friendly query handler that always includes a medical disclaimer
+        in the LLM prompt and surfaces retrieved context and conversation history.
+
+        Args:
+            question (str): The user's question
+            session_id (str): Session identifier for history tracking
+            k (int): Number of RAG chunks to retrieve
+            include_history (bool): Whether to include previous messages in the prompt
+            disclaimer (str, optional): Custom disclaimer text to prepend to the system message
+
+        Returns:
+            Dict[str, Any]: Response payload ready for API consumption
+        """
+        if not question or not question.strip():
+            return {
+                "success": False,
+                "error": "Query text is required.",
+                "answer": None
+            }
+
+        # Gather conversation history if requested
+        conversation_history = self.get_conversation_history(session_id) if include_history else ""
+
+        # Classify query to gate non-medical topics
+        classification = self.llm_client.classify_query(question)
+        is_non_medical = classification == "non-medical"
+
+        # Retrieve RAG context
+        results = self.vector_store.search(question, k=k)
+        chunks_found = len(results)
+        context_chunks = [res.get("content", "") for res in results]
+        rag_context = "\n\n".join(context_chunks) if context_chunks else "No context retrieved from the knowledge base."
+
+        base_disclaimer = (
+            "You are MedBot, a medical information assistant. Provide educational medical information only, "
+            "avoid diagnoses or treatment advice, and use a professional tone. If the user asks about a non-medical "
+            "topic, respond exactly with: \"I am a medical bot and can only assist with medical-related topics.\""
+        )
+        disclaimer_text = f"{base_disclaimer}\n\nAdditional context: {disclaimer.strip()}" if disclaimer else base_disclaimer
+
+        structured_prompt = f"""{disclaimer_text}
+
+User Query:
+{question}
+
+Relevant RAG Chunks:
+{rag_context}
+
+Previous Chat Context:
+{conversation_history if conversation_history else 'No previous messages.'}
+
+Instructions:
+- Use the provided RAG context first; if it is insufficient, rely on safe, general medical knowledge.
+- Maintain continuity with the prior conversation when present.
+- Be concise, clear, and educational.
+- Never leave a medical question unanswered.
+Answer:"""
+
+        if is_non_medical:
+            answer = "I am a medical bot and can only assist with medical-related topics."
+        else:
+            answer = self.llm_client.generate_response(structured_prompt)
+            answer = self._ensure_valid_response(answer, question, "medical")
+            self.add_to_conversation_history(question, answer, session_id)
+            self.save_conversation(session_id)
+
+        return {
+            "success": True,
+            "answer": answer,
+            "classification": classification or "unknown",
+            "chunks_found": chunks_found,
+            "session_id": session_id,
+            "disclaimer": disclaimer_text,
+            "conversation_history_included": include_history,
+            "rag_context": rag_context,
+            "context_snippets": [
+                {
+                    "content": res.get("content", ""),
+                    "metadata": res.get("metadata", {}),
+                    "similarity": res.get("similarity")
+                }
+                for res in results
+            ]
+        }
     
     def _process_no_chunks_query(self, question: str, prompt_type: str, 
                                 conversation_history: str = "") -> str:
