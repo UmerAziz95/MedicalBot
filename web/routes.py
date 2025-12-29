@@ -6,12 +6,14 @@ import os
 import time
 import traceback
 import uuid
-from flask import request, jsonify, render_template_string, session
+from flask import request, jsonify, render_template_string, session, url_for
 from processors.speech_handler import SpeechHandler
 
 # Fix import to use the module
 import processors.image_processor
 from web.templates.index import HTML_TEMPLATE
+from web.swagger import SWAGGER_UI_TEMPLATE, get_openapi_spec
+from config.settings import MAX_RETRIEVED_CHUNKS
 
 def register_routes(app):
     """Register all routes for the application"""
@@ -205,6 +207,50 @@ def register_routes(app):
                     "query_time": 0,
                     "chunks_found": 0
                 }), 500
+
+    @app.route('/api/v2/medical-query', methods=['POST'])
+    def api_query_v2():
+        """JSON-first API that wraps the medical RAG flow with explicit disclaimer handling"""
+        try:
+            payload = request.get_json(silent=True) or {}
+            question = (payload.get("query") or payload.get("question") or "").strip()
+            include_history = payload.get("include_history", True)
+            disclaimer = payload.get("disclaimer")
+            k = int(payload.get("k", MAX_RETRIEVED_CHUNKS))
+
+            if not question:
+                return jsonify({"success": False, "error": "Query text is required."}), 400
+
+            # Resolve session (allow clients to pass their own ID)
+            session_id = payload.get("session_id") or session.get("session_id") or str(uuid.uuid4())
+            session['session_id'] = session_id
+
+            rag, _ = init_system()
+            result = rag.api_query(
+                question,
+                session_id=session_id,
+                k=k,
+                include_history=include_history,
+                disclaimer=disclaimer
+            )
+
+            return jsonify(result), (200 if result.get("success") else 400)
+        except Exception as e:
+            print(f"API v2 query error: {e}")
+            print(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route('/api/openapi.json')
+    def openapi_spec():
+        """Serve OpenAPI specification for the Medical Bot API"""
+        spec = get_openapi_spec()
+        return jsonify(spec)
+
+    @app.route('/api/docs')
+    def swagger_docs():
+        """Render Swagger UI powered by the generated OpenAPI spec"""
+        spec_url = url_for('openapi_spec', _external=False)
+        return render_template_string(SWAGGER_UI_TEMPLATE, spec_url=spec_url)
 
     @app.route('/api/upload', methods=['POST'])
     def upload_document():
