@@ -93,13 +93,14 @@ class VectorStore:
             self._ensure_collection_exists()
             return []
     
-    def search(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
+    def search(self, query: str, k: int = 3, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Search for similar documents (compatibility method)
         
         Args:
             query (str): Query string
             k (int): Number of results to return
+            where (Dict[str, Any], optional): Metadata filter (e.g., tenant_id/workspace_id)
             
         Returns:
             List[Dict[str, Any]]: List of document data with similarity scores
@@ -112,7 +113,8 @@ class VectorStore:
             results = self.collection.query(
                 query_texts=[query],
                 n_results=k,
-                include=["documents", "metadatas", "distances"]
+                include=["documents", "metadatas", "distances"],
+                where=where or None
             )
             
             formatted_results = []

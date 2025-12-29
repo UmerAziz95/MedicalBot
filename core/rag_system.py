@@ -362,6 +362,125 @@ Answer:"""
                     "success": False,
                     "error": str(e)
                 }
+
+    def api_query(self, question: str, session_id: str = "default", 
+                 k: int = MAX_RETRIEVED_CHUNKS, include_history: bool = True,
+                 disclaimer: Optional[str] = None,
+                 tenant_id: Optional[str] = None,
+                 workspace_id: Optional[str] = None,
+                 prior_chat_history: Optional[List[Dict[str, str]]] = None,
+                 external_knowledge_instructions: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Structured API-friendly query handler that always includes a medical disclaimer
+        in the LLM prompt and surfaces retrieved context and conversation history.
+
+        Args:
+            question (str): The user's question
+            session_id (str): Session identifier for history tracking
+            k (int): Number of RAG chunks to retrieve
+            include_history (bool): Whether to include previous messages in the prompt
+            disclaimer (str, optional): Custom disclaimer text to prepend to the system message
+
+        Returns:
+            Dict[str, Any]: Response payload ready for API consumption
+        """
+        if not question or not question.strip():
+            return {
+                "success": False,
+                "error": "Query text is required.",
+                "answer": None
+            }
+
+        # Gather conversation history if requested or supplied explicitly
+        conversation_history = ""
+        if prior_chat_history:
+            formatted_history = ""
+            for entry in prior_chat_history:
+                role = entry.get("role", "user").capitalize()
+                content = entry.get("content", "")
+                formatted_history += f"{role}: {content}\n"
+            conversation_history = formatted_history
+        elif include_history:
+            conversation_history = self.get_conversation_history(session_id)
+
+        # Classify query to gate non-medical topics
+        classification = self.llm_client.classify_query(question)
+        is_non_medical = classification == "non-medical"
+
+        # Retrieve RAG context
+        where_filter = {}
+        if tenant_id:
+            where_filter["tenant_id"] = tenant_id
+        if workspace_id:
+            where_filter["workspace_id"] = workspace_id
+
+        results = self.vector_store.search(question, k=k, where=where_filter or None)
+        chunks_found = len(results)
+        context_chunks = [res.get("content", "") for res in results]
+        rag_context = "\n\n".join(context_chunks) if context_chunks else "No context retrieved from the knowledge base."
+
+        base_disclaimer = (
+            "You are MedBot, a medical information assistant. Provide educational medical information only, "
+            "avoid diagnoses or treatment advice, and use a professional tone. If the user asks about a non-medical "
+            "topic, respond exactly with: \"I am a medical bot and can only assist with medical-related topics.\""
+        )
+        disclaimer_text = f"{base_disclaimer}\n\nAdditional context: {disclaimer.strip()}" if disclaimer else base_disclaimer
+
+        tenant_section = f"Tenant: {tenant_id or 'default_tenant'}\nWorkspace: {workspace_id or 'default_workspace'}"
+        extra_instructions = external_knowledge_instructions or ""
+
+        structured_prompt = f"""{disclaimer_text}
+
+User Query:
+{question}
+
+Tenant/Workspace Context:
+{tenant_section}
+
+Relevant RAG Chunks:
+{rag_context}
+
+Previous Chat Context:
+{conversation_history if conversation_history else 'No previous messages.'}
+
+External Knowledge Instructions:
+{extra_instructions if extra_instructions else 'None provided.'}
+
+Instructions:
+- Use the provided RAG context first; if it is insufficient, rely on safe, general medical knowledge.
+- Maintain continuity with the prior conversation when present.
+- Be concise, clear, and educational.
+- Never leave a medical question unanswered.
+Answer:"""
+
+        if is_non_medical:
+            answer = "I am a medical bot and can only assist with medical-related topics."
+        else:
+            answer = self.llm_client.generate_response(structured_prompt)
+            answer = self._ensure_valid_response(answer, question, "medical")
+            self.add_to_conversation_history(question, answer, session_id)
+            self.save_conversation(session_id)
+
+        return {
+            "success": True,
+            "answer": answer,
+            "classification": classification or "unknown",
+            "chunks_found": chunks_found,
+            "session_id": session_id,
+            "disclaimer": disclaimer_text,
+            "conversation_history_included": include_history,
+            "rag_context": rag_context,
+            "tenant_id": tenant_id or "default_tenant",
+            "workspace_id": workspace_id or "default_workspace",
+            "context_snippets": [
+                {
+                    "content": res.get("content", ""),
+                    "metadata": res.get("metadata", {}),
+                    "similarity": res.get("similarity")
+                }
+                for res in results
+            ]
+        }
     
     def _process_no_chunks_query(self, question: str, prompt_type: str, 
                                 conversation_history: str = "") -> str:
@@ -496,7 +615,9 @@ Answer:"""
                 "error": str(e)
             }
     
-    def add_document(self, file_path: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
+    def add_document(self, file_path: str, metadata: Optional[Dict] = None,
+                    tenant_id: Optional[str] = None,
+                    workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Add a document to the RAG system
         
@@ -520,8 +641,12 @@ Answer:"""
             if metadata is None:
                 metadata = {
                     "source": os.path.basename(file_path),
-                    "added_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
+
+            # Always include tenant/workspace scoping
+            metadata["tenant_id"] = tenant_id or metadata.get("tenant_id") or "default_tenant"
+            metadata["workspace_id"] = workspace_id or metadata.get("workspace_id") or "default_workspace"
             
             # Add chunks to vector store
             for i, chunk in enumerate(chunks):

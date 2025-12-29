@@ -19,7 +19,8 @@ class DocumentSetup:
         self.vector_store = VectorStore()
         self.processed_files = []
     
-    def add_document(self, file_path: str, clear_existing: bool = False) -> bool:
+    def add_document(self, file_path: str, clear_existing: bool = False,
+                    tenant_id: str | None = None, workspace_id: str | None = None) -> bool:
         """
         Process and store a single document
         
@@ -85,6 +86,9 @@ class DocumentSetup:
             
             current_count = self.vector_store.get_collection_info().get('document_count', 0)
             
+            tenant_value = tenant_id or "default_tenant"
+            workspace_value = workspace_id or "default_workspace"
+
             for i, chunk in enumerate(chunks):
                 chunk_id = f"{file_name}_{current_count + i}"
                 chunk_ids.append(chunk_id)
@@ -92,7 +96,9 @@ class DocumentSetup:
                 chunk_metadatas.append({
                     "source": file_name,
                     "chunk_index": i,
-                    "total_chunks": len(chunks)
+                    "total_chunks": len(chunks),
+                    "tenant_id": tenant_value,
+                    "workspace_id": workspace_value
                 })
             
             # Store all chunks at once
@@ -117,7 +123,8 @@ class DocumentSetup:
             print(f"   ❌ Error processing {file_path}: {e}")
             return False
     
-    def add_multiple_documents(self, file_paths: list, clear_existing: bool = False) -> dict:
+    def add_multiple_documents(self, file_paths: list, clear_existing: bool = False,
+                               tenant_id: str | None = None, workspace_id: str | None = None) -> dict:
         """
         Process multiple documents
         
@@ -141,7 +148,8 @@ class DocumentSetup:
             # Only clear on first file
             should_clear = clear_existing and i == 0
             
-            if self.add_document(file_path, clear_existing=should_clear):
+            if self.add_document(file_path, clear_existing=should_clear,
+                                 tenant_id=tenant_id, workspace_id=workspace_id):
                 results["successful"] += 1
                 if self.processed_files:
                     last_file = self.processed_files[-1]
@@ -180,7 +188,9 @@ class DocumentSetup:
         
         return info
     
-    def process_all_documents_in_folder(self, folder_path=None) -> dict:
+    def process_all_documents_in_folder(self, folder_path=None,
+                                        tenant_id: str | None = None,
+                                        workspace_id: str | None = None) -> dict:
         """
         Process all supported documents in a folder
         
@@ -219,4 +229,9 @@ class DocumentSetup:
             }
             
         print(f"Found {len(file_paths)} documents to process")
-        return self.add_multiple_documents(file_paths)
+        return self.add_multiple_documents(
+            file_paths,
+            clear_existing=False,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id
+        )
