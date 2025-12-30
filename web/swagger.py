@@ -62,56 +62,48 @@ def get_openapi_spec():
                                     "properties": {
                                         "query": {
                                             "type": "string",
-                                            "description": "User's medical question.",
                                             "example": "What are early symptoms of hypertension?",
                                         },
                                         "tenant_id": {
                                             "type": "string",
-                                            "description": "Tenant identifier to scope retrieval.",
                                             "example": "tenant_5dsolutions",
                                         },
                                         "workspace_id": {
                                             "type": "string",
-                                            "description": "Workspace identifier to scope retrieval.",
                                             "example": "ws_marketing_ops",
                                         },
                                         "include_history": {
                                             "type": "boolean",
                                             "default": True,
-                                            "description": "Include prior conversation in the prompt.",
                                         },
                                         "session_id": {
                                             "type": "string",
-                                            "description": "Optional conversation/session identifier.",
                                         },
                                         "k": {
                                             "type": "integer",
                                             "default": MAX_RETRIEVED_CHUNKS,
                                             "minimum": 1,
-                                            "description": "Number of RAG chunks to retrieve.",
                                         },
                                         "disclaimer": {
                                             "type": "string",
-                                            "description": (
-                                                "Optional extra disclaimer to append to the default medical guardrails."
-                                            ),
                                             "example": "Responses are informational and not a substitute for professional care.",
                                         },
                                         "prior_chat_history": {
                                             "type": "array",
-                                            "description": "Optional prior messages to enforce continuity.",
                                             "items": {
                                                 "type": "object",
                                                 "properties": {
-                                                    "role": {"type": "string", "example": "user"},
-                                                    "content": {"type": "string", "example": "how to become transcultural nursing"}
-                                                }
-                                            }
+                                                    "role": {"type": "string"},
+                                                    "content": {"type": "string"},
+                                                },
+                                            },
                                         },
                                         "external_knowledge_instructions": {
                                             "type": "string",
-                                            "description": "Additional instructions to guide the assistant (e.g., domain constraints).",
-                                            "example": "You are a medical education assistant. Maintain continuity with prior chat history and stay within the tenant/workspace scope."
+                                            "example": (
+                                                "You are a medical education assistant. "
+                                                "Maintain continuity with prior chat history."
+                                            ),
                                         },
                                     },
                                     "required": ["query"],
@@ -140,8 +132,14 @@ def get_openapi_spec():
                                                     "type": "object",
                                                     "properties": {
                                                         "content": {"type": "string"},
-                                                        "metadata": {"type": "object", "additionalProperties": True},
-                                                        "similarity": {"type": "number", "format": "float"},
+                                                        "metadata": {
+                                                            "type": "object",
+                                                            "additionalProperties": True,
+                                                        },
+                                                        "similarity": {
+                                                            "type": "number",
+                                                            "format": "float",
+                                                        },
                                                     },
                                                 },
                                             },
@@ -151,16 +149,23 @@ def get_openapi_spec():
                                         },
                                     }
                                 }
-                            }
-                        },
+                            },
                         },
                         "400": {
                             "description": "Invalid request payload",
-                            "content": {"application/json": {"schema": {"type": "object"}}},
+                            "content": {
+                                "application/json": {
+                                    "schema": {"type": "object"}
+                                }
+                            },
                         },
                         "500": {
                             "description": "Server error",
-                            "content": {"application/json": {"schema": {"type": "object"}}},
+                            "content": {
+                                "application/json": {
+                                    "schema": {"type": "object"}
+                                }
+                            },
                         },
                     },
                 }
@@ -168,11 +173,14 @@ def get_openapi_spec():
             "/api/status": {
                 "get": {
                     "summary": "Get system status",
-                    "description": "Returns document counts, API connectivity, and session info.",
                     "responses": {
                         "200": {
                             "description": "Status details",
-                            "content": {"application/json": {"schema": {"type": "object"}}},
+                            "content": {
+                                "application/json": {
+                                    "schema": {"type": "object"}
+                                }
+                            },
                         }
                     },
                 }
@@ -183,7 +191,11 @@ def get_openapi_spec():
                     "responses": {
                         "200": {
                             "description": "OpenAPI specification",
-                            "content": {"application/json": {"schema": {"type": "object"}}},
+                            "content": {
+                                "application/json": {
+                                    "schema": {"type": "object"}
+                                }
+                            },
                         }
                     },
                 }
