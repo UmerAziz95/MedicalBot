@@ -68,10 +68,6 @@ def get_openapi_spec():
                                             "type": "string",
                                             "example": "tenant_5dsolutions",
                                         },
-                                        "workspace_id": {
-                                            "type": "string",
-                                            "example": "ws_marketing_ops",
-                                        },
                                         "include_history": {
                                             "type": "boolean",
                                             "default": True,
@@ -144,7 +140,6 @@ def get_openapi_spec():
                                                 },
                                             },
                                             "tenant_id": {"type": "string"},
-                                            "workspace_id": {"type": "string"},
                                             "rag_context": {"type": "string"},
                                         },
                                     }

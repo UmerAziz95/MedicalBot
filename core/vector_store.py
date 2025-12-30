@@ -100,7 +100,7 @@ class VectorStore:
         Args:
             query (str): Query string
             k (int): Number of results to return
-            where (Dict[str, Any], optional): Metadata filter (e.g., tenant_id/workspace_id)
+            where (Dict[str, Any], optional): Metadata filter (e.g., tenant_id)
             
         Returns:
             List[Dict[str, Any]]: List of document data with similarity scores

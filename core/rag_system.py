@@ -367,7 +367,6 @@ Answer:"""
                  k: int = MAX_RETRIEVED_CHUNKS, include_history: bool = True,
                  disclaimer: Optional[str] = None,
                  tenant_id: Optional[str] = None,
-                 workspace_id: Optional[str] = None,
                  prior_chat_history: Optional[List[Dict[str, str]]] = None,
                  external_knowledge_instructions: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -405,19 +404,40 @@ Answer:"""
 
         # Classify query to gate non-medical topics
         classification = self.llm_client.classify_query(question)
+
+        # Heuristic fallback if classification fails
+        if classification is None:
+            medical_keywords = ["health", "medicine", "doctor", "hospital", "disease", "condition",
+                              "symptom", "treatment", "drug", "patient", "nurse", "therapy", "medical",
+                              "clinical", "diagnosis", "surgery", "organ", "body", "anatomy", "nursing",
+                              "blood", "heart", "lungs", "brain", "liver", "kidney", "ph level", "hp",
+                              "immune", "diet", "nutrition", "cancer", "diabetes", "virus", "bacterial",
+                              "infection", "prescription", "diagnosis", "prognosis", "chronic", "acute"]
+
+            non_medical_keywords = ["computer", "programming", "gaming", "video game", "sports", "politics",
+                                  "entertainment", "movies", "celebrity", "stock market", "finance",
+                                  "cooking", "recipes", "travel", "vacation", "cars", "fashion",
+                                  "technology", "crypto", "weather", "news", "music", "art", "books"]
+
+            lower_question = question.lower()
+            if any(keyword in lower_question for keyword in non_medical_keywords) and not any(keyword in lower_question for keyword in medical_keywords):
+                classification = "non-medical"
+            elif any(keyword in lower_question for keyword in medical_keywords):
+                classification = "medical"
+            else:
+                classification = "unknown"
+
         is_non_medical = classification == "non-medical"
 
         # Retrieve RAG context
         where_filter = {}
         if tenant_id:
             where_filter["tenant_id"] = tenant_id
-        if workspace_id:
-            where_filter["workspace_id"] = workspace_id
 
         results = self.vector_store.search(question, k=k, where=where_filter or None)
         chunks_found = len(results)
         context_chunks = [res.get("content", "") for res in results]
-        rag_context = "\n\n".join(context_chunks) if context_chunks else "No context retrieved from the knowledge base."
+        rag_context = "\n\n".join(context_chunks) if context_chunks else f"No context retrieved from the knowledge base for tenant '{tenant_id or 'default_tenant'}'."
 
         base_disclaimer = (
             "You are MedBot, a medical information assistant. Provide educational medical information only, "
@@ -426,7 +446,7 @@ Answer:"""
         )
         disclaimer_text = f"{base_disclaimer}\n\nAdditional context: {disclaimer.strip()}" if disclaimer else base_disclaimer
 
-        tenant_section = f"Tenant: {tenant_id or 'default_tenant'}\nWorkspace: {workspace_id or 'default_workspace'}"
+        tenant_section = f"Tenant: {tenant_id or 'default_tenant'}"
         extra_instructions = external_knowledge_instructions or ""
 
         structured_prompt = f"""{disclaimer_text}
@@ -434,7 +454,7 @@ Answer:"""
 User Query:
 {question}
 
-Tenant/Workspace Context:
+Tenant Context:
 {tenant_section}
 
 Relevant RAG Chunks:
@@ -458,6 +478,14 @@ Answer:"""
         else:
             answer = self.llm_client.generate_response(structured_prompt)
             answer = self._ensure_valid_response(answer, question, "medical")
+
+            # Final guard against empty responses
+            if not answer or not answer.strip():
+                answer = (
+                    "I couldn't retrieve tenant-scoped medical context for this question yet. "
+                    "Based on general medical guidance, please consult a healthcare professional for personalized advice."
+                )
+
             self.add_to_conversation_history(question, answer, session_id)
             self.save_conversation(session_id)
 
@@ -471,7 +499,6 @@ Answer:"""
             "conversation_history_included": include_history,
             "rag_context": rag_context,
             "tenant_id": tenant_id or "default_tenant",
-            "workspace_id": workspace_id or "default_workspace",
             "context_snippets": [
                 {
                     "content": res.get("content", ""),
@@ -616,8 +643,7 @@ Answer:"""
             }
     
     def add_document(self, file_path: str, metadata: Optional[Dict] = None,
-                    tenant_id: Optional[str] = None,
-                    workspace_id: Optional[str] = None) -> Dict[str, Any]:
+                    tenant_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Add a document to the RAG system
         
@@ -644,9 +670,8 @@ Answer:"""
                     "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
 
-            # Always include tenant/workspace scoping
+            # Always include tenant scoping
             metadata["tenant_id"] = tenant_id or metadata.get("tenant_id") or "default_tenant"
-            metadata["workspace_id"] = workspace_id or metadata.get("workspace_id") or "default_workspace"
             
             # Add chunks to vector store
             for i, chunk in enumerate(chunks):
