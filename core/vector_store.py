@@ -2,8 +2,10 @@
 Vector database operations using ChromaDB
 """
 
-import chromadb
 from typing import List, Dict, Any, Optional
+
+import chromadb
+from chromadb.config import Settings
 from config.settings import COLLECTION_NAME, CHROMA_DB_PATH
 
 
@@ -20,11 +22,58 @@ class VectorStore:
         # Use provided path or default from config
         path_to_use = db_path if db_path is not None else CHROMA_DB_PATH
         
-        # Use persistent client with a specific path
-        self.client = chromadb.PersistentClient(path=path_to_use)
+        self.client = self._create_client(path_to_use)
         self.collection_name = COLLECTION_NAME
         self.collection = None
         self._ensure_collection_exists()
+
+    def _create_client(self, path: str):
+        """Create a single-tenant Chroma client with best-effort compatibility."""
+        settings = Settings(anonymized_telemetry=False)
+        try:
+            return chromadb.PersistentClient(
+                path=path,
+                settings=settings,
+                tenant="default_tenant",
+                database="default_database",
+            )
+        except TypeError:
+            return chromadb.PersistentClient(path=path, settings=settings)
+        except ValueError as exc:
+            if "tenant" in str(exc).lower():
+                self._ensure_default_tenant(settings)
+                return chromadb.PersistentClient(
+                    path=path,
+                    settings=settings,
+                    tenant="default_tenant",
+                    database="default_database",
+                )
+            raise
+
+    def _ensure_default_tenant(self, settings: Settings) -> None:
+        """Ensure default tenant/database exist for single-tenant usage."""
+        try:
+            admin = chromadb.AdminClient(settings=settings)
+        except Exception:
+            try:
+                admin = chromadb.AdminClient()
+            except Exception:
+                return
+
+        try:
+            admin.create_tenant("default_tenant")
+        except Exception:
+            pass
+
+        try:
+            admin.create_database("default_database", tenant="default_tenant")
+        except TypeError:
+            try:
+                admin.create_database(tenant="default_tenant", name="default_database")
+            except Exception:
+                pass
+        except Exception:
+            pass
     
     def _ensure_collection_exists(self):
         """Ensure collection exists and is accessible"""
@@ -93,14 +142,13 @@ class VectorStore:
             self._ensure_collection_exists()
             return []
     
-    def search(self, query: str, k: int = 3, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def search(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
         """
         Search for similar documents (compatibility method)
         
         Args:
             query (str): Query string
             k (int): Number of results to return
-            where (Dict[str, Any], optional): Metadata filter (e.g., tenant_id)
             
         Returns:
             List[Dict[str, Any]]: List of document data with similarity scores
@@ -113,8 +161,7 @@ class VectorStore:
             results = self.collection.query(
                 query_texts=[query],
                 n_results=k,
-                include=["documents", "metadatas", "distances"],
-                where=where or None
+                include=["documents", "metadatas", "distances"]
             )
             
             formatted_results = []
