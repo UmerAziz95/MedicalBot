@@ -64,10 +64,6 @@ def get_openapi_spec():
                                             "type": "string",
                                             "example": "What are early symptoms of hypertension?",
                                         },
-                                        "tenant_id": {
-                                            "type": "string",
-                                            "example": "tenant_5dsolutions",
-                                        },
                                         "include_history": {
                                             "type": "boolean",
                                             "default": True,
@@ -139,7 +135,6 @@ def get_openapi_spec():
                                                     },
                                                 },
                                             },
-                                            "tenant_id": {"type": "string"},
                                             "rag_context": {"type": "string"},
                                         },
                                     }
