@@ -363,10 +363,9 @@ Answer:"""
                     "error": str(e)
                 }
 
-    def api_query(self, question: str, session_id: str = "default", 
+    def api_query(self, question: str, session_id: str = "default",
                  k: int = MAX_RETRIEVED_CHUNKS, include_history: bool = True,
                  disclaimer: Optional[str] = None,
-                 tenant_id: Optional[str] = None,
                  prior_chat_history: Optional[List[Dict[str, str]]] = None,
                  external_knowledge_instructions: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -430,14 +429,10 @@ Answer:"""
         is_non_medical = classification == "non-medical"
 
         # Retrieve RAG context
-        where_filter = {}
-        if tenant_id:
-            where_filter["tenant_id"] = tenant_id
-
-        results = self.vector_store.search(question, k=k, where=where_filter or None)
+        results = self.vector_store.search(question, k=k)
         chunks_found = len(results)
         context_chunks = [res.get("content", "") for res in results]
-        rag_context = "\n\n".join(context_chunks) if context_chunks else f"No context retrieved from the knowledge base for tenant '{tenant_id or 'default_tenant'}'."
+        rag_context = "\n\n".join(context_chunks) if context_chunks else "No context retrieved from the knowledge base."
 
         base_disclaimer = (
             "You are MedBot, a medical information assistant. Provide educational medical information only, "
@@ -446,16 +441,12 @@ Answer:"""
         )
         disclaimer_text = f"{base_disclaimer}\n\nAdditional context: {disclaimer.strip()}" if disclaimer else base_disclaimer
 
-        tenant_section = f"Tenant: {tenant_id or 'default_tenant'}"
         extra_instructions = external_knowledge_instructions or ""
 
         structured_prompt = f"""{disclaimer_text}
 
 User Query:
 {question}
-
-Tenant Context:
-{tenant_section}
 
 Relevant RAG Chunks:
 {rag_context}
@@ -482,7 +473,7 @@ Answer:"""
             # Final guard against empty responses
             if not answer or not answer.strip():
                 answer = (
-                    "I couldn't retrieve tenant-scoped medical context for this question yet. "
+                    "I couldn't retrieve medical context for this question yet. "
                     "Based on general medical guidance, please consult a healthcare professional for personalized advice."
                 )
 
@@ -498,7 +489,6 @@ Answer:"""
             "disclaimer": disclaimer_text,
             "conversation_history_included": include_history,
             "rag_context": rag_context,
-            "tenant_id": tenant_id or "default_tenant",
             "context_snippets": [
                 {
                     "content": res.get("content", ""),
@@ -642,8 +632,7 @@ Answer:"""
                 "error": str(e)
             }
     
-    def add_document(self, file_path: str, metadata: Optional[Dict] = None,
-                    tenant_id: Optional[str] = None) -> Dict[str, Any]:
+    def add_document(self, file_path: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Add a document to the RAG system
         
@@ -670,9 +659,6 @@ Answer:"""
                     "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
 
-            # Always include tenant scoping
-            metadata["tenant_id"] = tenant_id or metadata.get("tenant_id") or "default_tenant"
-            
             # Add chunks to vector store
             for i, chunk in enumerate(chunks):
                 chunk_id = f"{os.path.basename(file_path)}_{i}"
@@ -876,6 +862,6 @@ Answer:"""
                         return "This appears to be a medical question. While I don't have specific information about this in my medical knowledge base, I'd encourage you to consult with a healthcare professional for accurate, personalized medical information."
             else:
                 # For non-medical questions that got this far
-                return "I am a medical bot and can only assist with medical-related topicss."
+                return "I am a medical bot and can only assist with medical-related topics."
         
         return answer
