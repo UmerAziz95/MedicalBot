@@ -22,18 +22,58 @@ class VectorStore:
         # Use provided path or default from config
         path_to_use = db_path if db_path is not None else CHROMA_DB_PATH
         
-        # Use local API to avoid multi-tenant validation in newer Chroma clients
-        self.client = chromadb.Client(
-            Settings(
-                chroma_api_impl="chromadb.api.local.LocalAPI",
-                chroma_db_impl="duckdb+parquet",
-                persist_directory=path_to_use,
-                anonymized_telemetry=False,
-            )
-        )
+        self.client = self._create_client(path_to_use)
         self.collection_name = COLLECTION_NAME
         self.collection = None
         self._ensure_collection_exists()
+
+    def _create_client(self, path: str):
+        """Create a single-tenant Chroma client with best-effort compatibility."""
+        settings = Settings(anonymized_telemetry=False)
+        try:
+            return chromadb.PersistentClient(
+                path=path,
+                settings=settings,
+                tenant="default_tenant",
+                database="default_database",
+            )
+        except TypeError:
+            return chromadb.PersistentClient(path=path, settings=settings)
+        except ValueError as exc:
+            if "tenant" in str(exc).lower():
+                self._ensure_default_tenant(settings)
+                return chromadb.PersistentClient(
+                    path=path,
+                    settings=settings,
+                    tenant="default_tenant",
+                    database="default_database",
+                )
+            raise
+
+    def _ensure_default_tenant(self, settings: Settings) -> None:
+        """Ensure default tenant/database exist for single-tenant usage."""
+        try:
+            admin = chromadb.AdminClient(settings=settings)
+        except Exception:
+            try:
+                admin = chromadb.AdminClient()
+            except Exception:
+                return
+
+        try:
+            admin.create_tenant("default_tenant")
+        except Exception:
+            pass
+
+        try:
+            admin.create_database("default_database", tenant="default_tenant")
+        except TypeError:
+            try:
+                admin.create_database(tenant="default_tenant", name="default_database")
+            except Exception:
+                pass
+        except Exception:
+            pass
     
     def _ensure_collection_exists(self):
         """Ensure collection exists and is accessible"""
