@@ -217,7 +217,6 @@ def register_routes(app):
             include_history = payload.get("include_history", True)
             disclaimer = payload.get("disclaimer")
             k = int(payload.get("k", MAX_RETRIEVED_CHUNKS))
-            tenant_id = payload.get("tenant_id")
             prior_chat_history = payload.get("prior_chat_history")
             external_knowledge_instructions = payload.get("external_knowledge_instructions")
 
@@ -235,7 +234,6 @@ def register_routes(app):
                 k=k,
                 include_history=include_history,
                 disclaimer=disclaimer,
-                tenant_id=tenant_id,
                 prior_chat_history=prior_chat_history,
                 external_knowledge_instructions=external_knowledge_instructions
             )
@@ -293,14 +291,11 @@ def register_routes(app):
             
             file.save(temp_path)
 
-            tenant_id = request.form.get("tenant_id") or request.args.get("tenant_id")
-            
             try:
                 # Process file
                 rag, setup = init_system()
                 result = setup.add_document(
-                    temp_path,
-                    tenant_id=tenant_id
+                    temp_path
                 )
                 
                 return jsonify({
