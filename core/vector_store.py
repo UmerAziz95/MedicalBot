@@ -2,8 +2,10 @@
 Vector database operations using ChromaDB
 """
 
-import chromadb
 from typing import List, Dict, Any, Optional
+
+import chromadb
+from chromadb.config import Settings
 from config.settings import COLLECTION_NAME, CHROMA_DB_PATH
 
 
@@ -20,8 +22,15 @@ class VectorStore:
         # Use provided path or default from config
         path_to_use = db_path if db_path is not None else CHROMA_DB_PATH
         
-        # Use persistent client with a specific path
-        self.client = chromadb.PersistentClient(path=path_to_use)
+        # Use local API to avoid multi-tenant validation in newer Chroma clients
+        self.client = chromadb.Client(
+            Settings(
+                chroma_api_impl="chromadb.api.local.LocalAPI",
+                chroma_db_impl="duckdb+parquet",
+                persist_directory=path_to_use,
+                anonymized_telemetry=False,
+            )
+        )
         self.collection_name = COLLECTION_NAME
         self.collection = None
         self._ensure_collection_exists()
@@ -93,14 +102,13 @@ class VectorStore:
             self._ensure_collection_exists()
             return []
     
-    def search(self, query: str, k: int = 3, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def search(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
         """
         Search for similar documents (compatibility method)
         
         Args:
             query (str): Query string
             k (int): Number of results to return
-            where (Dict[str, Any], optional): Metadata filter (e.g., tenant_id)
             
         Returns:
             List[Dict[str, Any]]: List of document data with similarity scores
@@ -113,8 +121,7 @@ class VectorStore:
             results = self.collection.query(
                 query_texts=[query],
                 n_results=k,
-                include=["documents", "metadatas", "distances"],
-                where=where or None
+                include=["documents", "metadatas", "distances"]
             )
             
             formatted_results = []
